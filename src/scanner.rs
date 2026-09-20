@@ -19,10 +19,10 @@
 //! keep in memory until it is whole. That is a real bound and it is
 //! [`Limits::max_buffered_box`], which is a default rather than a law:
 //! a stream of one-second fragments at a high bitrate is a different
-//! number from a stream of one frame each. The old copy of this code
-//! called any box past a quarter of a gigabyte malformed, which is a
-//! statement about a file rather than about the reader, and it is
-//! gone.
+//! number from a stream of one frame each. The streaming implementation
+//! this was consolidated from called any box past a quarter of a
+//! gigabyte malformed, which is a statement about a file rather than
+//! about the reader, and it is gone.
 //!
 //! **A box of declared size zero** (§4.2) runs to the end of the
 //! stream. That is exactly what some muxers write for the `mdat` of a
@@ -545,7 +545,7 @@ mod tests {
     fn an_mdat_of_declared_size_zero_closes_at_the_end_of_the_stream() {
         // §4.2's third size, which a muxer writing into a pipe uses
         // because it does not know the length when it writes the
-        // header. The old copy of this code called it unsupported.
+        // header. The implementation this came from refused it.
         let mut bytes = boxed(b"ftyp", b"iso5");
         bytes.extend_from_slice(&boxed(b"moov", &[0; 16]));
         bytes.extend_from_slice(&moof_bytes(1, true));

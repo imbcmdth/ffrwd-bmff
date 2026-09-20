@@ -1,16 +1,16 @@
 //! ISO base media files, read and written: MP4, MOV, 3GP, and the
 //! fragmented shape of the same boxes.
 //!
-//! One box-walking layer serves three jobs that used to have three
-//! copies of it. A **reader** over [`Read`] and [`Seek`] that finds a
+//! One box-walking layer serves four callers that used to walk boxes
+//! separately. A **reader** over [`Read`] and [`Seek`] that finds a
 //! track and every sample of it without pulling a picture into memory
 //! ([`source`], [`track`], [`fragment`]). A **scanner** that cuts a
 //! byte stream arriving a chunk at a time into an init segment and one
 //! fragment per `moof` ([`scanner`]). A **writer** that builds the
 //! `ftyp`+`moov` a decoder needs and the `moof`+`mdat` fragments after
-//! it ([`mux`]). And, because a file is a place to keep things as well
-//! as a thing to play, a **patcher** that finds, appends or replaces a
-//! top-level box in place ([`patch`]).
+//! it ([`mux`]). And a **patcher** that finds, appends or replaces a
+//! top-level box in place, for a file that has to carry something that
+//! is not media ([`patch`]).
 //!
 //! Three properties shape all of it.
 //!
@@ -29,9 +29,9 @@
 //! into one. Parsing it, and the NAL units or OBUs of a sample, is
 //! `ffrwd-nal`'s job, and neither crate depends on the other.
 //!
-//! **It has no dependencies.** Not `bytes`, not `mp4-atom`, nothing.
-//! It builds for `wasm32-wasip2` and for the host, and a module
-//! compiles it in.
+//! **It has no dependencies.** It builds for `wasm32-wasip2` and for
+//! the host, so a wasm module compiles it in and its tests run without
+//! one.
 //!
 //! [`Read`]: std::io::Read
 //! [`Seek`]: std::io::Seek

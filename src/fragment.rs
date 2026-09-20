@@ -15,12 +15,13 @@
 //!    for **each one after it**, the base is the end of the data the
 //!    preceding track fragment described.
 //!
-//! Two copies of this code used to exist and neither had case 3. One
-//! took the `moof` start for every track fragment, which puts the
-//! second track's samples on top of the first's in any file written
-//! without either flag; the other refused a `moof` with more than one
-//! `traf` outright. Both are right about the single-track fragment a
-//! live stream carries, and both are wrong about a muxed file.
+//! The two implementations this crate was consolidated from had
+//! neither of them case 3. One took the `moof` start for every track
+//! fragment, which puts the second track's samples on top of the
+//! first's in any file written without either flag; the other refused
+//! a `moof` with more than one `traf` outright. Both are right about
+//! the single-track fragment a live stream carries, and both are wrong
+//! about a muxed file.
 //!
 //! §8.8.8 then chains the runs inside one track fragment: a `trun`
 //! with `data-offset-present` starts at `base + data_offset`, and one
@@ -484,8 +485,9 @@ mod tests {
     fn a_later_track_fragment_with_no_flags_carries_on_from_the_one_before() {
         // Neither flag set. The first track fragment starts at the moof
         // and runs 30 bytes; the second must start where that ended,
-        // not back at the moof. The two old copies of this code either
-        // put it back at the moof or refused the file.
+        // not back at the moof. The two implementations this was
+        // consolidated from either put it back at the moof or refused
+        // the file.
         let one = boxed(b"traf", &[tfhd(1, 0, &[]), trun(None, &[10, 20])].concat());
         let two = boxed(b"traf", &[tfhd(2, 0, &[]), trun(None, &[5, 5])].concat());
         let bytes = moof(&[one, two]);

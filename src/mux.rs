@@ -12,8 +12,8 @@
 //! [`Mode::PerSample`] emits one fragment per sample. That is a
 //! publishing convention, not a property of the format: it is what a
 //! transport wanting each frame to leave as it is encoded asks for,
-//! and it is the default here because that is the caller this code was
-//! extracted from. [`Mode::PerCut`] holds settled samples until
+//! and it is the default because that is the commoner caller.
+//! [`Mode::PerCut`] holds settled samples until
 //! [`cut`](Muxer::cut) says to close one fragment over all of them,
 //! which is the shape ffmpeg writes, a whole group of pictures to a
 //! `moof`. The writer does not care which; nothing in the types

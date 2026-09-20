@@ -2,14 +2,19 @@
 name = "ffrwd-bmff"
 version = "0.1.0"
 edition = "2021"
+# The oldest toolchain this is written against. Nothing here uses an API
+# newer than it, so a module built on an older pinned toolchain compiles
+# the crate in without a fight.
+rust-version = "1.87"
 license = "Apache-2.0"
-description = "ISO base media files, read and written: MP4 and fragmented MP4, with no dependencies and no codec knowledge."
+repository = "https://github.com/imbcmdth/ffrwd-bmff"
+description = "ISO base media files read and written: MP4 and fragmented MP4, box walking, sample tables, movie fragments and in-place patching, with no dependencies and no codec parsing."
 
 [lib]
 name = "ffrwd_bmff"
 
-# None. Not `bytes`, not `mp4-atom`: a box header is eight bytes of
-# big-endian integer and a decoder configuration record is a slice this
-# crate never looks inside, so there is nothing here a dependency would
-# do that the standard library does not.
+# None. A box header is eight bytes of big-endian integer and a decoder
+# configuration record is a slice this crate never looks inside, so
+# there is nothing here a dependency would do that the standard library
+# does not, and a wasm module carries every byte of what it links.
 [dependencies]
