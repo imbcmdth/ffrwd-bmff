@@ -559,7 +559,6 @@ mod tests {
             edit: crate::track::Edit::default(),
             samples: Vec::new(),
             start_shift: 0,
-            next_dts: 0,
         };
         let err = track
             .fragment_samples(&boxed(b"free", &[]))

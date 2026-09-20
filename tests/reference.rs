@@ -149,6 +149,68 @@ fn the_file_reader_and_the_scanner_read_the_same_samples() {
     }
 }
 
+#[test]
+fn a_track_built_from_parts_reads_the_same_as_a_parsed_one() {
+    // What a reader of another container has to hand: a handler, a
+    // timescale, a sample entry with an opaque configuration record,
+    // and samples whose offsets are absolute in the same byte source.
+    // A `Track` built from those four has to behave like one that came
+    // out of a `moov`, or a routine that takes `&Track` cannot serve
+    // both containers.
+    let mut src = Source::new(std::io::Cursor::new(bytes())).expect("a source");
+    let parsed = track::read(&mut src, Pick::Video).expect("a track");
+
+    let foreign = Track::from_parts(
+        parsed.handler,
+        parsed.timescale,
+        parsed.entry.clone(),
+        parsed.samples.clone(),
+    )
+    .with_start_shift(parsed.start_shift);
+
+    assert_eq!(foreign.samples.len(), parsed.samples.len());
+    assert_eq!(foreign.is_video(), parsed.is_video());
+    assert_eq!(foreign.next_dts(), parsed.next_dts(), "derived, not stored");
+    for (index, (mine, theirs)) in foreign.samples.iter().zip(&parsed.samples).enumerate() {
+        assert_eq!(mine.index, theirs.index, "sample {index}");
+        assert_eq!(
+            foreign.ms(mine.pts),
+            parsed.ms(theirs.pts),
+            "sample {index} presentation time"
+        );
+        assert_eq!(
+            foreign.ms(mine.dts),
+            parsed.ms(theirs.dts),
+            "sample {index} decode time"
+        );
+        // And the bytes come out of the same source at the same place.
+        let want = src
+            .span(theirs.offset, u64::from(theirs.size))
+            .expect("the parsed sample's bytes");
+        let got = src
+            .span(mine.offset, u64::from(mine.size))
+            .expect("the built sample's bytes");
+        assert_eq!(got, want, "sample {index} bytes");
+    }
+
+    // Round trip: every part of a parsed track can be said again, and
+    // what comes back is the track that was taken apart. The three
+    // fields `from_parts` does not take are public, which is how an
+    // ISO-aware caller says them.
+    let mut rebuilt = Track::from_parts(
+        parsed.handler,
+        parsed.timescale,
+        parsed.entry.clone(),
+        parsed.samples.clone(),
+    )
+    .with_track_id(parsed.track_id)
+    .with_start_shift(parsed.start_shift);
+    rebuilt.movie_timescale = parsed.movie_timescale;
+    rebuilt.edit = parsed.edit;
+    rebuilt.defaults = parsed.defaults;
+    assert_eq!(rebuilt, parsed);
+}
+
 // ------------------------------------------------------------------ //
 // The writer.
 // ------------------------------------------------------------------ //

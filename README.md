@@ -31,7 +31,7 @@ for sample in &track.samples {
 
 ```toml
 [dependencies]
-ffrwd-bmff = { git = "https://github.com/imbcmdth/ffrwd-bmff", tag = "v0.1.0" }
+ffrwd-bmff = { git = "https://github.com/imbcmdth/ffrwd-bmff", tag = "v0.1.1" }
 ```
 
 ## What it does
@@ -68,6 +68,15 @@ moving anything else, `patch::find` and `patch::read` get it back, and
 `patch::rewrite` copies a file without one. The box is named by a
 four-character type or a 16-byte `uuid`, and its payload is the
 caller's.
+
+Building a track without boxes. `Track::from_parts` takes a handler, a
+timescale, a sample entry and samples, and leaves everything only an
+ISO file has at the value that means the file said nothing. A reader
+of another container uses it to hand back the same `Track` an MP4 read
+produces, so a routine that takes `&Track` and reads samples out of a
+`Source` serves both. Its doc says which invariants the caller owns:
+decode order, offsets and sizes absolute in the source the samples will
+be read from, and times in the track's own ticks.
 
 ## What it leaves to the caller
 

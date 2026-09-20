@@ -17,11 +17,25 @@ should now go.
 `ffrwd_index_container::mp4`, `::source` and `::write` become thin
 wrappers or go away. The index format's own `UUID` and `FileIndex`
 stay where they are: this crate takes a selector and a payload and
-knows nothing about either. Matroska (`container::mkv`) is untouched,
-and so is `container::scan`, whose prefix read stops at the first
-coded slice and therefore needs NAL knowledge; it gets what it needs
-from `Source::read_at`, `Sample::offset`, `Sample::size` and
-`Track::ms`.
+knows nothing about either.
+
+`container::mkv` keeps its own parsing, because Matroska is not a box
+format, but it returns a `Track` like the MP4 reader does. From 0.1.1
+that is `Track::from_parts(Handler::Video, timescale, entry, samples)`,
+with `entry.kind` set to the four characters the CodecID maps to
+(`avc1`, `hvc1`, `av01`), `entry.config` set to the CodecPrivate
+bytes as the file carried them, and `with_start_shift` where the
+container has an offset to report. Every sample's `offset` and `size`
+have to be absolute in the same `Source` the caller will read them
+from, and `pts`/`dts` in the track's own ticks with any shift already
+applied; `from_parts` renumbers `index` itself.
+
+That is what lets `container::scan` take `&Track` and serve both
+containers. Its prefix read stops at the first coded slice and
+therefore needs NAL knowledge, so the framing stays with the caller:
+`ffrwd_nal::config::framing_of(&track.entry.kind, &track.entry.config)`
+derives it, and everything else the scan needs is `Source::read_at`,
+`Sample::offset`, `Sample::size` and `Track::ms`.
 
 | was | is |
 | --- | --- |
@@ -49,6 +63,7 @@ from `Source::read_at`, `Sample::offset`, `Sample::size` and
 | `VideoTrack.start_shift` | `track.start_shift` |
 | `VideoTrack.samples`, `Sample` | `track.samples`, `track::Sample` (gains `dts` and `duration`) |
 | `VideoTrack::scanned(scan)` | the caller's own filter on `sample.keyframe` |
+| building a `VideoTrack` from the Matroska reader | `Track::from_parts`, then `with_start_shift` (0.1.1) |
 | `Error::Format(&'static str)` | `Error::Format(Fault)` |
 | `Error::Unsupported(String)` | `Error::Unsupported(Fault)`, no allocation |
 | `Error::Io`, `Error::Codec` | `Error::Io`; there is no codec error, because there is no codec |

@@ -1,6 +1,6 @@
 [package]
 name = "ffrwd-bmff"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # The oldest toolchain this is written against. Nothing here uses an API
 # newer than it, so a module built on an older pinned toolchain compiles

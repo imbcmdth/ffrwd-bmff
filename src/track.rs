@@ -218,15 +218,103 @@ pub struct Track {
     /// How far the edit list moved every time: `pts` as returned is the
     /// stored composition time plus this.
     pub start_shift: i64,
-    /// The decode time after the last sample of the `stbl`, which is
-    /// where a fragment with no `tfdt` carries on from.
-    pub(crate) next_dts: i64,
 }
 
 impl Track {
+    /// A track assembled from parts rather than parsed out of boxes.
+    ///
+    /// Every field of [`Track`] is public, so a struct literal would
+    /// work too; this exists so that a caller need not name the fields
+    /// that only an ISO file has, and so that adding one later is not a
+    /// breaking change. It is what a reader of **another container**
+    /// uses to hand back the same type an MP4 read produces, which is
+    /// what lets one sample-reading routine serve both.
+    ///
+    /// The fields it does not take are left at the values that mean
+    /// "the file said nothing": `track_id` 1, `movie_timescale`
+    /// [`DEFAULT_MOVIE_TIMESCALE`], an [`Edit`] with no entries,
+    /// [`TrexDefaults`] all zero, and `start_shift` 0. Set any of them
+    /// afterwards, or use [`with_track_id`](Self::with_track_id) and
+    /// [`with_start_shift`](Self::with_start_shift).
+    ///
+    /// # What the caller is promising
+    ///
+    /// - `samples` is in **decode order**. `index` is renumbered here
+    ///   from zero, so the caller does not have to get that right.
+    /// - Each sample's `offset` and `size` are **absolute in whatever
+    ///   byte source the samples will be read from**, the same source a
+    ///   [`Source`] will be opened on. They are not relative to a
+    ///   cluster, a block or a fragment.
+    /// - `dts`, `pts` and `duration` are in **`timescale` ticks**, with
+    ///   any shift the container applies already applied, so that
+    ///   [`ms`](Self::ms) prints what a player shows. `start_shift`
+    ///   records what that shift was, for a caller that wants to say
+    ///   why; nothing in this crate subtracts it again.
+    /// - `keyframe` is true exactly where a decoder may start.
+    /// - `duration` may be 0 where the container did not say. Nothing
+    ///   here divides by it.
+    ///
+    /// A `timescale` of 0 is taken as 1, because dividing by it is
+    /// worse than not.
+    ///
+    /// [`DEFAULT_MOVIE_TIMESCALE`]: crate::mux::DEFAULT_MOVIE_TIMESCALE
+    /// [`Source`]: crate::source::Source
+    pub fn from_parts(
+        handler: Handler,
+        timescale: u32,
+        entry: SampleEntry,
+        samples: Vec<Sample>,
+    ) -> Track {
+        let mut samples = samples;
+        for (index, sample) in samples.iter_mut().enumerate() {
+            sample.index = index as u32;
+        }
+        Track {
+            track_id: 1,
+            handler,
+            timescale: timescale.max(1),
+            movie_timescale: crate::mux::DEFAULT_MOVIE_TIMESCALE,
+            entry,
+            defaults: TrexDefaults::default(),
+            edit: Edit::default(),
+            samples,
+            start_shift: 0,
+        }
+    }
+
+    /// The `track_ID` this track answers to, which is what
+    /// [`fragment_samples`](Self::fragment_samples) matches a `traf`
+    /// against.
+    pub fn with_track_id(mut self, track_id: u32) -> Self {
+        self.track_id = track_id;
+        self
+    }
+
+    /// What a container's own start offset moved every time by, for a
+    /// caller that wants to report it. The sample times are expected to
+    /// have it in them already.
+    pub fn with_start_shift(mut self, start_shift: i64) -> Self {
+        self.start_shift = start_shift;
+        self
+    }
+
     /// A tick count of this track's timescale, as milliseconds.
     pub fn ms(&self, ticks: i64) -> i64 {
         time::ms(ticks, self.timescale)
+    }
+
+    /// The decode time after the last sample, which is where a fragment
+    /// that states no `tfdt` of its own carries on from.
+    ///
+    /// Derived rather than stored: it is the last sample's `dts` plus
+    /// its `duration`, and zero for a track with no samples. For a
+    /// track read out of a `moov` that is exactly what the `stts`
+    /// deltas add up to.
+    pub fn next_dts(&self) -> i64 {
+        match self.samples.last() {
+            Some(last) => last.dts.saturating_add(last.duration),
+            None => 0,
+        }
     }
 
     pub fn is_video(&self) -> bool {
@@ -289,6 +377,15 @@ impl Track {
     ///
     /// See [`crate::fragment`] for how a sample's position is worked
     /// out, which is the part of §8.8.7 implementations disagree about.
+    ///
+    /// This reads the `moof` against this track's `track_id` and
+    /// `defaults`, and nothing else about the track is consulted. On a
+    /// track from [`from_parts`](Self::from_parts) that means `track_id`
+    /// 1 and no `trex` defaults, so a `moof` naming another track comes
+    /// back empty and one that relies on `trex` defaults reads them as
+    /// zero. A track that was not built from an ISO init segment is not
+    /// going to be handed ISO fragments, and this says what happens
+    /// rather than refusing.
     pub fn fragment_samples(&self, fragment: &[u8]) -> Result<Vec<Sample>> {
         self.fragment_samples_at(fragment, 0)
     }
@@ -348,7 +445,7 @@ pub fn read<R: Read + Seek>(src: &mut Source<R>, pick: Pick) -> Result<Track> {
             Error::unsupported("the file holds no track of the kind this read was after")
         })?;
 
-    let mut decode = track.next_dts;
+    let mut decode = track.next_dts();
     for moof in top.iter().filter(|header| header.is(b"moof")) {
         let bytes = src.span(moof.body, moof.body_len())?;
         let found = fragment::samples_of_moof(
@@ -439,7 +536,7 @@ fn read_trak(
     )?;
     let stsd = child(&stbl, b"stsd").ok_or_else(|| Error::format("a track with no stsd"))?;
     let entry = sample_entry(stsd, limits)?;
-    let (samples, next_dts) = samples_of_stbl(&stbl, limits)?;
+    let samples = samples_of_stbl(&stbl, limits)?;
     let defaults = trex_of(moov, track_id, limits)?;
     Ok(Some(Track {
         track_id,
@@ -451,7 +548,6 @@ fn read_trak(
         edit,
         samples,
         start_shift: 0,
-        next_dts,
     }))
 }
 
@@ -641,9 +737,13 @@ fn trex_of(moov: &[Child<'_>], track_id: u32, limits: &Limits) -> Result<TrexDef
 // The sample tables.
 // ------------------------------------------------------------------ //
 
-/// Every sample a `stbl` describes, and the decode time after the last
-/// of them, which is where a fragment carries on from (§8.5.1).
-pub(crate) fn samples_of_stbl(stbl: &[Child<'_>], limits: &Limits) -> Result<(Vec<Sample>, i64)> {
+/// Every sample a `stbl` describes, in decode order (§8.5.1).
+///
+/// The decode time after the last of them, which is where a fragment
+/// with no `tfdt` carries on from, is [`Track::next_dts`]: the last
+/// sample's own decode time plus its duration, which is what the `stts`
+/// deltas add up to.
+pub(crate) fn samples_of_stbl(stbl: &[Child<'_>], limits: &Limits) -> Result<Vec<Sample>> {
     let sizes = match child(stbl, b"stsz") {
         Some(body) => stsz(body, limits)?,
         None => match child(stbl, b"stz2") {
@@ -656,7 +756,7 @@ pub(crate) fn samples_of_stbl(stbl: &[Child<'_>], limits: &Limits) -> Result<(Ve
         return Err(Error::format("more samples than this reader will hold"));
     }
     if total == 0 {
-        return Ok((Vec::new(), 0));
+        return Ok(Vec::new());
     }
     let chunks = match child(stbl, b"stco") {
         Some(body) => offsets32(body)?,
@@ -765,7 +865,7 @@ pub(crate) fn samples_of_stbl(stbl: &[Child<'_>], limits: &Limits) -> Result<(Ve
         // which is what an all-intra track looks like.
         None => samples.iter_mut().for_each(|sample| sample.keyframe = true),
     }
-    Ok((samples, dts))
+    Ok(samples)
 }
 
 /// A sample size table, either one number for all of them or a list
@@ -998,27 +1098,113 @@ mod tests {
     }
 
     fn track_with(times: &[i64]) -> Track {
-        Track {
-            track_id: 1,
-            handler: Handler::Video,
-            timescale: 1_200_000,
-            movie_timescale: 1000,
-            entry: SampleEntry::default(),
-            defaults: TrexDefaults::default(),
-            edit: Edit::default(),
-            samples: times
+        Track::from_parts(
+            Handler::Video,
+            1_200_000,
+            SampleEntry::default(),
+            times
                 .iter()
-                .enumerate()
-                .map(|(index, pts)| Sample {
-                    index: index as u32,
+                .map(|pts| Sample {
                     pts: *pts,
                     dts: *pts,
                     ..Sample::default()
                 })
                 .collect(),
-            start_shift: 0,
-            next_dts: 0,
-        }
+        )
+    }
+
+    #[test]
+    fn a_track_from_parts_numbers_its_own_samples_and_says_nothing_it_was_not_told() {
+        let track = Track::from_parts(
+            Handler::Video,
+            48_000,
+            SampleEntry {
+                kind: *b"avc1",
+                config: vec![1, 2, 3],
+                ..SampleEntry::default()
+            },
+            vec![
+                Sample {
+                    index: 77,
+                    offset: 900,
+                    size: 10,
+                    dts: 0,
+                    pts: 0,
+                    duration: 480,
+                    keyframe: true,
+                },
+                Sample {
+                    index: 77,
+                    offset: 910,
+                    size: 12,
+                    dts: 480,
+                    pts: 480,
+                    duration: 480,
+                    keyframe: false,
+                },
+            ],
+        );
+        // The caller does not have to number the samples.
+        assert_eq!(
+            track
+                .samples
+                .iter()
+                .map(|one| one.index)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        // And everything the caller did not say is the "nothing was
+        // said" value, not a guess.
+        assert_eq!(track.track_id, 1);
+        assert_eq!(track.movie_timescale, crate::mux::DEFAULT_MOVIE_TIMESCALE);
+        assert_eq!(track.edit, Edit::default());
+        assert_eq!(track.defaults, TrexDefaults::default());
+        assert_eq!(track.start_shift, 0);
+        assert!(track.is_video());
+        // The decode time after the last sample is derived, not stored.
+        assert_eq!(track.next_dts(), 960);
+        assert_eq!(
+            Track::from_parts(Handler::Audio, 48_000, SampleEntry::default(), Vec::new())
+                .next_dts(),
+            0
+        );
+        // A timescale of zero is taken as one rather than divided by.
+        let zero = Track::from_parts(Handler::Video, 0, SampleEntry::default(), Vec::new());
+        assert_eq!(zero.timescale, 1);
+        assert_eq!(zero.ms(2), 2000);
+        // The two builders are the only other things a foreign reader
+        // needs to say.
+        let set = track.clone().with_track_id(7).with_start_shift(-15);
+        assert_eq!((set.track_id, set.start_shift), (7, -15));
+        assert_eq!(set.samples, track.samples, "and nothing else moved");
+    }
+
+    #[test]
+    fn a_fragment_read_against_a_track_from_parts_matches_nothing_and_says_so() {
+        // `fragment_samples` matches a `traf` against this track's
+        // `track_id`, which from parts is 1 unless the caller said
+        // otherwise. A foreign reader will not be handing this ISO
+        // fragments, and the answer is an empty list rather than a
+        // refusal.
+        let track = Track::from_parts(Handler::Video, 90_000, SampleEntry::default(), Vec::new());
+        let mut traf = full_boxed(b"tfhd", 0, 0x02_0000, &9u32.to_be_bytes());
+        traf.extend_from_slice(&full_boxed(b"trun", 0, 0x200, &{
+            let mut payload = 1u32.to_be_bytes().to_vec();
+            payload.extend_from_slice(&4u32.to_be_bytes());
+            payload
+        }));
+        let moof = boxed(
+            b"moof",
+            &[
+                full_boxed(b"mfhd", 0, 0, &1u32.to_be_bytes()),
+                boxed(b"traf", &traf),
+            ]
+            .concat(),
+        );
+        assert!(track.fragment_samples(&moof).expect("a read").is_empty());
+        // Named as track 9, the same fragment reads.
+        let named = track.with_track_id(9);
+        assert_eq!(named.fragment_samples(&moof).expect("a read").len(), 1);
     }
 
     #[test]
