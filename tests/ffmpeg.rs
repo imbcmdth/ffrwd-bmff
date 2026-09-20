@@ -807,8 +807,8 @@ fn a_box_goes_into_every_shape_of_file_and_comes_back_out() {
 // Bad bytes, over files with real structure in them.
 // ------------------------------------------------------------------ //
 
-#[path = "reference.rs"]
-mod reference;
+mod common;
+use common::every_parser;
 
 #[test]
 fn every_truncation_of_a_real_file_is_refused_rather_than_survived() {
@@ -825,7 +825,7 @@ fn every_truncation_of_a_real_file_is_refused_rather_than_survived() {
             .chain(bytes.len().saturating_sub(4096)..bytes.len())
             .collect();
         for cut in cuts {
-            reference::every_parser(&bytes[..cut]);
+            every_parser(&bytes[..cut]);
         }
     }
 }
@@ -852,7 +852,7 @@ fn random_damage_to_a_real_file_is_refused_rather_than_survived() {
                 };
                 damaged[at] ^= 1 << (next() % 8);
             }
-            reference::every_parser(&damaged);
+            every_parser(&damaged);
         }
     }
 }
