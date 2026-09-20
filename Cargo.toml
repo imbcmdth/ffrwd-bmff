@@ -1,0 +1,15 @@
+[package]
+name = "ffrwd-bmff"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "ISO base media files, read and written: MP4 and fragmented MP4, with no dependencies and no codec knowledge."
+
+[lib]
+name = "ffrwd_bmff"
+
+# None. Not `bytes`, not `mp4-atom`: a box header is eight bytes of
+# big-endian integer and a decoder configuration record is a slice this
+# crate never looks inside, so there is nothing here a dependency would
+# do that the standard library does not.
+[dependencies]
